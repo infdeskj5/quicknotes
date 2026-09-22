@@ -66,8 +66,7 @@
                 android:background="@null"
                 android:padding="8dp"
                 android:singleLine="true"
-                android:imeOptions="actionSearch"
-                android:showSoftInputOnFocus="false" />
+                android:imeOptions="actionSearch" />
 
             <TextView
                 android:id="@+id/search_count"
