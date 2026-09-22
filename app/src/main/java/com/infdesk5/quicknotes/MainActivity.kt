@@ -439,6 +439,7 @@ class MainActivity : ComponentActivity() {
     // ===== SETTINGS BOTTOM MENU =====
 
     private fun showSettingsMenu() {
+        hideKeyboard()
         val items = arrayOf(
             getString(R.string.top_height),
             getString(R.string.scroller_size),
@@ -606,15 +607,16 @@ class MainActivity : ComponentActivity() {
                 onItemClick(which)
             }
             .setNegativeButton(getString(R.string.cancel), null)
-
         val dialog = builder.create()
         dialog.show()
-
         dialog.window?.setGravity(Gravity.BOTTOM)
         dialog.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         )
+        
+        // <--- ADD THIS: Forces the keyboard to stay hidden so the dialog anchors perfectly to the bottom
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
     }
 
     // ===== NOTE MANAGEMENT =====
@@ -885,6 +887,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showNotesMenu() {
+        hideKeyboard()
         lifecycleScope.launch {
             saveCurrentNoteNow()
 
@@ -1308,10 +1311,10 @@ class MainActivity : ComponentActivity() {
                 toast(getString(R.string.no_search_results))
                 return@launch
             }
+            
+            hideKeyboard()
     
-            val displayTexts = results.map {
-                "${it.first.displayName}\n${it.second}"
-            }.toTypedArray()
+            val displayTexts = results.map { "${it.first.displayName}\n${it.second}" }.toTypedArray()
     
             showBottomDialogSimple(
                 getString(
@@ -1973,9 +1976,12 @@ class MainActivity : ComponentActivity() {
 
     private fun hideKeyboard() {
         cancelKeyboardRetries()
-
-        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
-            .hideSoftInputFromWindow(editText.windowToken, 0)
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        // Safely grab the window token from whatever currently has focus, or fallback to the root layout
+        val token = currentFocus?.windowToken ?: rootLayout.windowToken ?: editText.windowToken
+        if (token != null) {
+            imm.hideSoftInputFromWindow(token, 0)
+        }
     }
 
     private fun showKeyboardReliably() {
