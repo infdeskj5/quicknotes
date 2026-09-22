@@ -609,14 +609,23 @@ class MainActivity : ComponentActivity() {
             .setNegativeButton(getString(R.string.cancel), null)
         val dialog = builder.create()
         dialog.show()
+        
         dialog.window?.setGravity(Gravity.BOTTOM)
         dialog.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         )
-        
-        // <--- ADD THIS: Forces the keyboard to stay hidden so the dialog anchors perfectly to the bottom
         dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+        
+        // <--- ADD THIS: Limit the list height to 45% of the screen so it stays within thumb's reach
+        val maxHeight = (resources.displayMetrics.heightPixels * 0.45).toInt()
+        dialog.listView?.post {
+            val listView = dialog.listView
+            if (listView != null && listView.height > maxHeight) {
+                listView.layoutParams = listView.layoutParams.apply { height = maxHeight }
+                listView.requestLayout()
+            }
+        }
     }
 
     // ===== NOTE MANAGEMENT =====
@@ -1308,23 +1317,26 @@ class MainActivity : ComponentActivity() {
             }
     
             if (results.isEmpty()) {
-                toast(getString(R.string.no_search_results))
-                return@launch
+            toast(getString(R.string.no_search_results))
+            return@launch
             }
             
             hideKeyboard()
-    
+            
             val displayTexts = results.map { "${it.first.displayName}\n${it.second}" }.toTypedArray()
-    
-            showBottomDialogSimple(
-                getString(
-                    R.string.search_results,
-                    results.size,
-                    results.map { it.first }.distinct().size
-                ),
-                displayTexts
-            ) { which ->
-                val (note, _, matchIndex) = results[which]
+            
+            // Delay showing the results dialog slightly. This ensures the forced keyboard 
+            // has enough time to fully collapse and won't push the dialog up or linger behind it.
+            rootLayout.postDelayed({
+                showBottomDialogSimple(
+                    getString(
+                        R.string.search_results,
+                        results.size,
+                        results.map { it.first }.distinct().size
+                    ),
+                    displayTexts
+                ) { which ->
+                    val (note, _, matchIndex) = results[which]
     
                 lifecycleScope.launch {
                     // Open the note without keyboard and without scrolling to bottom.
@@ -1977,8 +1989,8 @@ class MainActivity : ComponentActivity() {
     private fun hideKeyboard() {
         cancelKeyboardRetries()
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-        // Safely grab the window token from whatever currently has focus, or fallback to the root layout
-        val token = currentFocus?.windowToken ?: rootLayout.windowToken ?: editText.windowToken
+        // Use applicationWindowToken as a fallback to forcefully kill lingering forced keyboards
+        val token = currentFocus?.windowToken ?: rootLayout.windowToken ?: rootLayout.applicationWindowToken
         if (token != null) {
             imm.hideSoftInputFromWindow(token, 0)
         }
