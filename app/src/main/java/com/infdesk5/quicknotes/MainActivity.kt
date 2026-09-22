@@ -663,13 +663,18 @@ class MainActivity : ComponentActivity() {
         noteSlotBar.setOnSlotReorderListener { from, to ->
             lifecycleScope.launch {
                 val mutableNotes = allNotes.toMutableList()
-
-                if (from < mutableNotes.size && to < mutableNotes.size) {
+        
+                if (from >= 0 && from < mutableNotes.size && from != to) {
                     val item = mutableNotes.removeAt(from)
-                    mutableNotes.add(to, item)
-
+        
+                    if (to >= 0 && to < mutableNotes.size) {
+                        mutableNotes.add(to, item)
+                    } else {
+                        mutableNotes.add(item)
+                    }
+        
                     allNotes = mutableNotes
-
+        
                     updateSlotBar()
                     saveNoteOrder()
                 }
