@@ -184,6 +184,7 @@ class MainActivity : ComponentActivity() {
         btnSettings = findViewById(R.id.btn_settings)
 
         editText.showSoftInputOnFocus = false
+        searchInput.showSoftInputOnFocus = false // <--- ADD THIS LINE
 
         noteManager = NoteManager(this, getPreferences(MODE_PRIVATE))
 
