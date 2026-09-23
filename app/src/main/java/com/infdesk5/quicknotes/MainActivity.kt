@@ -580,10 +580,10 @@ class MainActivity : ComponentActivity() {
                 onItemClick(which)
             }
             .setNegativeButton(getString(R.string.cancel), null)
-
+    
         val dialog = builder.create()
         dialog.show()
-
+    
         dialog.window?.setGravity(Gravity.BOTTOM)
         dialog.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -592,10 +592,11 @@ class MainActivity : ComponentActivity() {
         dialog.window?.setSoftInputMode(
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
         )
-
+    
+        // Keep the dialog inside easy thumb reach.
         val maxHeight = (resources.displayMetrics.heightPixels * 0.45).toInt()
-        val listView = dialog.findViewById<ListView>(android.R.id.list)
-
+        val listView = dialog.listView
+    
         listView?.post {
             if (listView.height > maxHeight) {
                 val lp = listView.layoutParams
@@ -866,18 +867,18 @@ class MainActivity : ComponentActivity() {
 
     private fun showNotesMenu() {
         hideKeyboard()
-
+    
         lifecycleScope.launch {
             saveCurrentNoteNow()
-
+    
             val notes = noteManager.listNotes()
             if (notes.isEmpty()) {
                 toast(getString(R.string.no_notes_found))
                 return@launch
             }
-
+    
             val names = notes.map { it.displayName }.toTypedArray()
-
+    
             val builder = AlertDialog.Builder(this@MainActivity)
                 .setTitle(getString(R.string.notes))
                 .setItems(names) { _, which ->
@@ -887,10 +888,10 @@ class MainActivity : ComponentActivity() {
                     showCrossNoteSearch()
                 }
                 .setNegativeButton(getString(R.string.cancel), null)
-
+    
             val dialog = builder.create()
             dialog.show()
-
+    
             dialog.window?.setGravity(Gravity.BOTTOM)
             dialog.window?.setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -899,8 +900,10 @@ class MainActivity : ComponentActivity() {
             dialog.window?.setSoftInputMode(
                 WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
             )
-
-            val listView = dialog.findViewById<ListView>(android.R.id.list)
+    
+            // Important: use dialog.listView directly.
+            // findViewById(android.R.id.list) can be null in some AlertDialog setups.
+            val listView = dialog.listView
             listView?.setOnItemLongClickListener { _, _, position, _ ->
                 dialog.dismiss()
                 showNoteOptionsDialog(notes[position])
