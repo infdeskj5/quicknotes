@@ -63,6 +63,7 @@
 
     <string name="app_color">App color (Hex)</string>
     <string name="keyboard_on_select">Keyboard on text select</string>
+    <string name="close_settings_on_select">Close settings after selection</string>
     <string name="search_highlight_color">Search highlight color</string>
     <string name="current_search_color">Current search color</string>
 
