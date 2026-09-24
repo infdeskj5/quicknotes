@@ -117,6 +117,8 @@ class MainActivity : ComponentActivity() {
 
     private var suppressNextOpenNoteKeyboard = false
     private var suppressNextOpenNoteScrollToEnd = false
+    private var pendingExternalStorageSwitch = false
+    private var pendingSyncAfterFolder = false
 
     private val undoRedo = UndoRedoManager()
 
@@ -156,15 +158,37 @@ class MainActivity : ComponentActivity() {
     private val pickFolderLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri == null) {
-                toast(getString(R.string.folder_needed))
+                pendingExternalStorageSwitch = false
+                pendingSyncAfterFolder = false
                 return@registerForActivityResult
             }
-
-            if (noteManager.externalRepo.handlePermissionResult(uri)) {
-                noteManager.setTreeUri(uri)
-                lifecycleScope.launch { refreshNotes() }
-            } else {
-                toast("Permission was not persisted.")
+    
+            lifecycleScope.launch {
+                try {
+                    val granted = noteManager.externalRepo.handlePermissionResult(uri)
+                    noteManager.setTreeUri(uri)
+    
+                    if (granted) {
+                        if (pendingSyncAfterFolder) {
+                            pendingSyncAfterFolder = false
+                            syncNotes()
+                        } else if (pendingExternalStorageSwitch) {
+                            noteManager.storageMode = StorageMode.EXTERNAL
+                            refreshNotes()
+                            openLastNote()
+                            updateToolbarButtons()
+                        } else {
+                            refreshNotes()
+                        }
+                    } else {
+                        toast(getString(R.string.save_failed_choose_folder))
+                    }
+                } catch (e: Exception) {
+                    toast(getString(R.string.save_failed_choose_folder))
+                } finally {
+                    pendingExternalStorageSwitch = false
+                    pendingSyncAfterFolder = false
+                }
             }
         }
 
@@ -512,17 +536,27 @@ class MainActivity : ComponentActivity() {
         val dialog = builder.create()
     
         listView.setOnItemClickListener { _, _, position, _ ->
+            // These items open system pickers or external UI.
+            // Close Settings first so the app does not leave dialogs stacked behind the picker.
+            val forceCloseForPicker = position == 12 || position == 13 || position == 15
+    
+            if (forceCloseForPicker) {
+                dialog.dismiss()
+            }
+    
             handleSettingsItemClick(position)
     
-            if (noteManager.closeSettingsOnSelect) {
-                dialog.dismiss()
-            } else {
-                // Refresh labels while keeping the Settings popup open.
-                // This is useful for items whose text can change, like storage mode.
-                val newItems = buildItems()
-                adapter.clear()
-                adapter.addAll(*newItems)
-                adapter.notifyDataSetChanged()
+            if (!forceCloseForPicker) {
+                if (noteManager.closeSettingsOnSelect) {
+                    dialog.dismiss()
+                } else {
+                    // Refresh labels while keeping the Settings popup open.
+                    // This is useful for items whose text can change, like storage mode.
+                    val newItems = buildItems()
+                    adapter.clear()
+                    adapter.addAll(*newItems)
+                    adapter.notifyDataSetChanged()
+                }
             }
         }
     
@@ -580,10 +614,7 @@ class MainActivity : ComponentActivity() {
             12 -> syncNotes()
             13 -> importBackupLauncher.launch(arrayOf("application/zip"))
             14 -> exportBackup()
-            15 -> lifecycleScope.launch {
-                saveCurrentNoteNow()
-                pickFolderLauncher.launch(null)
-            }
+            15 -> pickFolderLauncher.launch(null)
         }
     }
 
@@ -1700,35 +1731,38 @@ class MainActivity : ComponentActivity() {
         } else {
             StorageMode.LOCAL
         }
-
+    
         if (newMode == StorageMode.EXTERNAL && !noteManager.externalRepo.hasPermission()) {
+            pendingExternalStorageSwitch = true
             pickFolderLauncher.launch(null)
             return
         }
-
+    
+        pendingExternalStorageSwitch = false
         noteManager.storageMode = newMode
-
+    
         lifecycleScope.launch {
             refreshNotes()
             openLastNote()
         }
-
+    
         updateToolbarButtons()
     }
 
     private fun syncNotes() {
         if (!noteManager.externalRepo.hasPermission()) {
             toast(getString(R.string.folder_needed))
+            pendingSyncAfterFolder = true
             pickFolderLauncher.launch(null)
             return
         }
-
+    
         lifecycleScope.launch {
             toast("Syncing...")
-
+    
             val result = noteManager.syncNotes()
             toast(getString(R.string.sync_complete, result.copied, result.updated))
-
+    
             refreshNotes()
         }
     }
