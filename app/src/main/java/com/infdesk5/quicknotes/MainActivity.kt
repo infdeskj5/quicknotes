@@ -445,7 +445,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showSettingsMenu() {
         hideKeyboard()
-
+    
         val items = arrayOf(
             getString(R.string.top_height),
             getString(R.string.scroller_size),
@@ -470,42 +470,17 @@ class MainActivity : ComponentActivity() {
             getString(R.string.export_backup),
             getString(R.string.choose_folder)
         )
-
-        val scrollView = ScrollView(this)
-        val listView = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-        }
-
-        val outValue = TypedValue()
-        theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
-
-        items.forEachIndexed { index, title ->
-            val itemView = TextView(this).apply {
-                text = title
-                textSize = 16f
-                setTextColor(ContextCompat.getColor(context, android.R.color.white))
-                setPadding(dp(16), dp(14), dp(16), dp(14))
-                setBackgroundResource(outValue.resourceId)
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    handleSettingsItemClick(index)
-                }
-            }
-            listView.addView(itemView)
-        }
-
-        scrollView.addView(listView)
-
+    
         val builder = AlertDialog.Builder(this)
             .setTitle(getString(R.string.settings))
-            .setView(scrollView)
+            .setItems(items) { _, which ->
+                handleSettingsItemClick(which)
+            }
             .setNegativeButton(getString(R.string.cancel), null)
-
+    
         val dialog = builder.create()
         dialog.show()
-
+    
         dialog.window?.setGravity(Gravity.BOTTOM)
         dialog.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -514,14 +489,18 @@ class MainActivity : ComponentActivity() {
         dialog.window?.setSoftInputMode(
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
         )
-
+    
+        // Same height limit as the Notes menu.
         val maxHeight = (resources.displayMetrics.heightPixels * 0.40).toInt()
-        scrollView.post {
-            if (scrollView.height > maxHeight) {
-                scrollView.layoutParams = scrollView.layoutParams.apply {
-                    height = maxHeight
+        dialog.listView?.post {
+            val listView = dialog.listView
+            if (listView != null && listView.height > maxHeight) {
+                val lp = listView.layoutParams
+                if (lp != null) {
+                    lp.height = maxHeight
+                    listView.layoutParams = lp
+                    listView.requestLayout()
                 }
-                scrollView.requestLayout()
             }
         }
     }
