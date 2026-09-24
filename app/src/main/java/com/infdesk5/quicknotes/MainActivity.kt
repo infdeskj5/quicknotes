@@ -901,13 +901,26 @@ class MainActivity : ComponentActivity() {
                 WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
             )
     
-            // Important: use dialog.listView directly.
-            // findViewById(android.R.id.list) can be null in some AlertDialog setups.
             val listView = dialog.listView
+    
+            // Long press to open note options (assign, delete, rename, shortcut)
             listView?.setOnItemLongClickListener { _, _, position, _ ->
                 dialog.dismiss()
                 showNoteOptionsDialog(notes[position])
                 true
+            }
+    
+            // Limit the list height to 40% of the screen (same as settings menu)
+            val maxHeight = (resources.displayMetrics.heightPixels * 0.40).toInt()
+            listView?.post {
+                if (listView.height > maxHeight) {
+                    val lp = listView.layoutParams
+                    if (lp != null) {
+                        lp.height = maxHeight
+                        listView.layoutParams = lp
+                        listView.requestLayout()
+                    }
+                }
             }
         }
     }
