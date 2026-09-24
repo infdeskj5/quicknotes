@@ -446,39 +446,86 @@ class MainActivity : ComponentActivity() {
     private fun showSettingsMenu() {
         hideKeyboard()
     
-        val items = arrayOf(
-            getString(R.string.top_height),
-            getString(R.string.scroller_size),
-            getString(R.string.show_scroller),
-            getString(R.string.max_slots),
-            getString(R.string.slot_length),
-            getString(R.string.app_color),
-            getString(R.string.search_highlight_color),
-            getString(R.string.current_search_color),
-            getString(R.string.keyboard_on_select),
-            getString(R.string.show_keyboard_on_open),
-            getString(
-                R.string.storage_mode,
-                if (noteManager.storageMode == StorageMode.LOCAL) {
-                    getString(R.string.storage_local)
-                } else {
-                    getString(R.string.storage_external)
-                }
-            ),
-            getString(R.string.sync_notes),
-            getString(R.string.import_backup),
-            getString(R.string.export_backup),
-            getString(R.string.choose_folder)
-        )
+        fun buildItems(): Array<String> {
+            return arrayOf(
+                getString(R.string.top_height),
+                getString(R.string.scroller_size),
+                getString(R.string.show_scroller),
+                getString(R.string.close_settings_on_select),
+                getString(R.string.max_slots),
+                getString(R.string.slot_length),
+                getString(R.string.app_color),
+                getString(R.string.search_highlight_color),
+                getString(R.string.current_search_color),
+                getString(R.string.keyboard_on_select),
+                getString(R.string.show_keyboard_on_open),
+                getString(
+                    R.string.storage_mode,
+                    if (noteManager.storageMode == StorageMode.LOCAL) {
+                        getString(R.string.storage_local)
+                    } else {
+                        getString(R.string.storage_external)
+                    }
+                ),
+                getString(R.string.sync_notes),
+                getString(R.string.import_backup),
+                getString(R.string.export_backup),
+                getString(R.string.choose_folder)
+            )
+        }
+    
+        val outValue = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+    
+        val listView = android.widget.ListView(this)
+        listView.divider = null
+        listView.dividerHeight = 0
+    
+        val adapter = object : android.widget.ArrayAdapter<String>(
+            this,
+            android.R.layout.simple_list_item_1,
+            buildItems()
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = super.getView(position, convertView, parent)
+    
+                val text = view.findViewById<TextView>(android.R.id.text1)
+    
+                text?.text = buildItems()[position]
+                text?.textSize = 16f
+                text?.setTextColor(Color.WHITE)
+                text?.setPadding(dp(16), dp(14), dp(16), dp(14))
+    
+                view.setBackgroundResource(outValue.resourceId)
+    
+                return view
+            }
+        }
+    
+        listView.adapter = adapter
     
         val builder = AlertDialog.Builder(this)
             .setTitle(getString(R.string.settings))
-            .setItems(items) { _, which ->
-                handleSettingsItemClick(which)
-            }
+            .setView(listView)
             .setNegativeButton(getString(R.string.cancel), null)
     
         val dialog = builder.create()
+    
+        listView.setOnItemClickListener { _, _, position, _ ->
+            handleSettingsItemClick(position)
+    
+            if (noteManager.closeSettingsOnSelect) {
+                dialog.dismiss()
+            } else {
+                // Refresh labels while keeping the Settings popup open.
+                // This is useful for items whose text can change, like storage mode.
+                val newItems = buildItems()
+                adapter.clear()
+                adapter.addAll(*newItems)
+                adapter.notifyDataSetChanged()
+            }
+        }
+    
         dialog.show()
     
         dialog.window?.setGravity(Gravity.BOTTOM)
@@ -492,9 +539,8 @@ class MainActivity : ComponentActivity() {
     
         // Same height limit as the Notes menu.
         val maxHeight = (resources.displayMetrics.heightPixels * 0.40).toInt()
-        dialog.listView?.post {
-            val listView = dialog.listView
-            if (listView != null && listView.height > maxHeight) {
+        listView.post {
+            if (listView.height > maxHeight) {
                 val lp = listView.layoutParams
                 if (lp != null) {
                     lp.height = maxHeight
@@ -513,24 +559,28 @@ class MainActivity : ComponentActivity() {
                 noteManager.showScroller = !noteManager.showScroller
                 applyScrollerVisibility()
             }
-            3 -> showSlotCountDialog()
-            4 -> showSlotLengthDialog()
-            5 -> showColorPicker()
-            6 -> showSearchColorPicker(false)
-            7 -> showSearchColorPicker(true)
-            8 -> {
+            3 -> {
+                noteManager.closeSettingsOnSelect = !noteManager.closeSettingsOnSelect
+                toast(if (noteManager.closeSettingsOnSelect) "Enabled" else "Disabled")
+            }
+            4 -> showSlotCountDialog()
+            5 -> showSlotLengthDialog()
+            6 -> showColorPicker()
+            7 -> showSearchColorPicker(false)
+            8 -> showSearchColorPicker(true)
+            9 -> {
                 noteManager.keyboardOnSelect = !noteManager.keyboardOnSelect
                 toast(if (noteManager.keyboardOnSelect) "Enabled" else "Disabled")
             }
-            9 -> {
+            10 -> {
                 noteManager.showKeyboardOnOpenNote = !noteManager.showKeyboardOnOpenNote
                 toast(if (noteManager.showKeyboardOnOpenNote) "Enabled" else "Disabled")
             }
-            10 -> toggleStorageMode()
-            11 -> syncNotes()
-            12 -> importBackupLauncher.launch(arrayOf("application/zip"))
-            13 -> exportBackup()
-            14 -> lifecycleScope.launch {
+            11 -> toggleStorageMode()
+            12 -> syncNotes()
+            13 -> importBackupLauncher.launch(arrayOf("application/zip"))
+            14 -> exportBackup()
+            15 -> lifecycleScope.launch {
                 saveCurrentNoteNow()
                 pickFolderLauncher.launch(null)
             }
