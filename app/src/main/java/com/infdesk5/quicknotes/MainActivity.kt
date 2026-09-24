@@ -1269,99 +1269,170 @@ class MainActivity : ComponentActivity() {
     private fun performCrossNoteSearch(query: String) {
         lifecycleScope.launch {
             val results = mutableListOf<Triple<Note, String, Int>>()
-
+    
             for (note in allNotes) {
                 val content = noteManager.readNote(note) ?: continue
                 val lowerContent = content.lowercase()
                 val lowerQuery = query.lowercase()
-
+    
                 var index = lowerContent.indexOf(lowerQuery)
-
+    
                 while (index >= 0) {
                     val start = maxOf(0, index - 30)
                     val end = minOf(content.length, index + query.length + 30)
-
+    
                     val snippet =
                         (if (start > 0) "..." else "") +
                                 content.substring(start, end) +
                                 (if (end < content.length) "..." else "")
-
+    
                     results.add(Triple(note, snippet, index))
                     index = lowerContent.indexOf(lowerQuery, index + query.length)
                 }
             }
-
+    
             if (results.isEmpty()) {
                 toast(getString(R.string.no_search_results))
                 return@launch
             }
-
+    
             hideKeyboard()
-
-            val displayTexts = results.map {
-                "${it.first.displayName}\n${it.second}"
-            }.toTypedArray()
-
+    
             rootLayout.postDelayed({
                 hideKeyboard()
-
-                showBottomDialogSimple(
-                    getString(
-                        R.string.search_results,
-                        results.size,
-                        results.map { it.first }.distinct().size
-                    ),
-                    displayTexts
-                ) { which ->
-                    val (note, _, matchIndex) = results[which]
-
-                    lifecycleScope.launch {
-                        suppressNextOpenNoteKeyboard = true
-                        suppressNextOpenNoteScrollToEnd = true
-
-                        openNote(note)
-
-                        searchBar.visibility = View.VISIBLE
-                        noteSlotBar.visibility = View.GONE
-
-                        hideKeyboard()
-
-                        searchInput.setText(query)
-                        updateSearchCount()
-
-                        editText.postDelayed({
-                            if (isFinishing || isDestroyed) return@postDelayed
-
-                            if (searchMatches.isEmpty()) {
-                                return@postDelayed
-                            }
-
-                            var targetIdx = searchMatches.indexOfFirst { it >= matchIndex }
-
-                            if (targetIdx == -1) {
-                                targetIdx = searchMatches.indexOfLast { it <= matchIndex }
-                            }
-
-                            if (targetIdx == -1) {
-                                targetIdx = 0
-                            }
-
-                            currentSearchIndex = targetIdx
-                            highlightCurrentMatch()
-                            updateSearchCount()
-
-                            val pos = searchMatches[currentSearchIndex]
-
-                            try {
-                                editText.setSelection(pos, pos + currentSearchQuery.length)
-                            } catch (_: Exception) {
-                            }
-
-                            scrollToSearchMatch(pos)
-                        }, 250)
-                    }
-                }
+                showGlobalSearchResultsDialog(query, results)
             }, 150)
+        }
+    }
+    
+    private fun showGlobalSearchResultsDialog(
+        query: String,
+        results: List<Triple<Note, String, Int>>
+    ) {
+        val adapter = object : android.widget.ArrayAdapter<Triple<Note, String, Int>>(
+            this,
+            android.R.layout.simple_list_item_2,
+            results
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = super.getView(position, convertView, parent)
+                val item = getItem(position)
+    
+                val text1 = view.findViewById<TextView>(android.R.id.text1)
+                val text2 = view.findViewById<TextView>(android.R.id.text2)
+    
+                text1?.text = item?.first?.displayName ?: ""
+                text2?.text = item?.second ?: ""
+    
+                // Note title uses the app/settings color.
+                text1?.setTextColor(noteManager.appColor)
+    
+                // Snippet stays white.
+                text2?.setTextColor(Color.WHITE)
+    
+                text1?.textSize = 15f
+                text2?.textSize = 13f
+    
+                text1?.maxLines = 1
+                text1?.ellipsize = android.text.TextUtils.TruncateAt.END
+    
+                text2?.maxLines = 2
+                text2?.ellipsize = android.text.TextUtils.TruncateAt.END
+    
+                return view
+            }
+        }
+    
+        val builder = AlertDialog.Builder(this)
+            .setTitle(
+                getString(
+                    R.string.search_results,
+                    results.size,
+                    results.map { it.first }.distinct().size
+                )
+            )
+            .setAdapter(adapter) { _, which ->
+                openGlobalSearchResult(query, results[which])
+            }
+            .setNegativeButton(getString(R.string.cancel), null)
+    
+        val dialog = builder.create()
+        dialog.show()
+    
+        dialog.window?.setGravity(Gravity.BOTTOM)
+        dialog.window?.setLayout(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+        )
+    
+        // Keep the results list inside easy thumb reach.
+        val maxHeight = (resources.displayMetrics.heightPixels * 0.45).toInt()
+        dialog.listView?.post {
+            val listView = dialog.listView
+            if (listView != null && listView.height > maxHeight) {
+                val lp = listView.layoutParams
+                if (lp != null) {
+                    lp.height = maxHeight
+                    listView.layoutParams = lp
+                    listView.requestLayout()
+                }
+            }
+        }
+    }
+    
+    private fun openGlobalSearchResult(
+        query: String,
+        result: Triple<Note, String, Int>
+    ) {
+        val (note, _, matchIndex) = result
+    
+        lifecycleScope.launch {
+            suppressNextOpenNoteKeyboard = true
+            suppressNextOpenNoteScrollToEnd = true
+    
+            openNote(note)
+    
+            searchBar.visibility = View.VISIBLE
+            noteSlotBar.visibility = View.GONE
+    
+            hideKeyboard()
+    
+            searchInput.setText(query)
+            updateSearchCount()
+    
+            editText.postDelayed({
+                if (isFinishing || isDestroyed) return@postDelayed
+    
+                if (searchMatches.isEmpty()) {
+                    return@postDelayed
+                }
+    
+                var targetIdx = searchMatches.indexOfFirst { it >= matchIndex }
+    
+                if (targetIdx == -1) {
+                    targetIdx = searchMatches.indexOfLast { it <= matchIndex }
+                }
+    
+                if (targetIdx == -1) {
+                    targetIdx = 0
+                }
+    
+                currentSearchIndex = targetIdx
+                highlightCurrentMatch()
+                updateSearchCount()
+    
+                val pos = searchMatches[currentSearchIndex]
+    
+                try {
+                    editText.setSelection(pos, pos + currentSearchQuery.length)
+                } catch (_: Exception) {
+                }
+    
+                scrollToSearchMatch(pos)
+            }, 250)
         }
     }
 
