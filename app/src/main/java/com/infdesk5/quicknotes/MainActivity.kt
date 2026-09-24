@@ -498,44 +498,30 @@ class MainActivity : ComponentActivity() {
             )
         }
     
-        val outValue = TypedValue()
-        theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
-    
-        val listView = android.widget.ListView(this)
-        listView.divider = null
-        listView.dividerHeight = 0
-    
-        val adapter = object : android.widget.ArrayAdapter<String>(
-            this,
-            android.R.layout.simple_list_item_1,
-            buildItems()
-        ) {
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val view = super.getView(position, convertView, parent)
-    
-                val text = view.findViewById<TextView>(android.R.id.text1)
-    
-                text?.text = buildItems()[position]
-                text?.textSize = 16f
-                text?.setTextColor(Color.WHITE)
-                text?.setPadding(dp(16), dp(14), dp(16), dp(14))
-    
-                view.setBackgroundResource(outValue.resourceId)
-    
-                return view
-            }
-        }
-    
-        listView.adapter = adapter
-    
         val builder = AlertDialog.Builder(this)
             .setTitle(getString(R.string.settings))
-            .setView(listView)
+            .setItems(buildItems()) { _, _ ->
+                // Intentionally empty.
+                // We replace the ListView click listener below so we can control
+                // whether the Settings popup closes or stays open.
+            }
             .setNegativeButton(getString(R.string.cancel), null)
     
         val dialog = builder.create()
+        dialog.show()
     
-        listView.setOnItemClickListener { _, _, position, _ ->
+        dialog.window?.setGravity(Gravity.BOTTOM)
+        dialog.window?.setLayout(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        dialog.window?.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+        )
+    
+        val listView = dialog.listView
+    
+        listView?.setOnItemClickListener { _, _, position, _ ->
             // These items open system pickers or external UI.
             // Close Settings first so the app does not leave dialogs stacked behind the picker.
             val forceCloseForPicker = position == 12 || position == 13 || position == 15
@@ -550,30 +536,30 @@ class MainActivity : ComponentActivity() {
                 if (noteManager.closeSettingsOnSelect) {
                     dialog.dismiss()
                 } else {
-                    // Refresh labels while keeping the Settings popup open.
-                    // This is useful for items whose text can change, like storage mode.
-                    val newItems = buildItems()
-                    adapter.clear()
-                    adapter.addAll(*newItems)
-                    adapter.notifyDataSetChanged()
+                    // Refresh labels safely.
+                    // This is mainly for the Storage: Local/External label.
+                    listView.post {
+                        try {
+                            @Suppress("UNCHECKED_CAST")
+                            val adapter = listView.adapter as? android.widget.ArrayAdapter<String>
+    
+                            if (adapter != null) {
+                                adapter.clear()
+                                adapter.addAll(*buildItems())
+                                adapter.notifyDataSetChanged()
+                            }
+                        } catch (_: Exception) {
+                            // If the internal AlertDialog adapter cannot be modified
+                            // on some device/version, ignore it safely.
+                        }
+                    }
                 }
             }
         }
     
-        dialog.show()
-    
-        dialog.window?.setGravity(Gravity.BOTTOM)
-        dialog.window?.setLayout(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        dialog.window?.setSoftInputMode(
-            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
-        )
-    
         // Same height limit as the Notes menu.
         val maxHeight = (resources.displayMetrics.heightPixels * 0.40).toInt()
-        listView.post {
+        listView?.post {
             if (listView.height > maxHeight) {
                 val lp = listView.layoutParams
                 if (lp != null) {
