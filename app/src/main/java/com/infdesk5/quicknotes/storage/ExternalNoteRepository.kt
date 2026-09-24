@@ -17,6 +17,7 @@ class ExternalNoteRepository(
 
     override suspend fun listNotes(): List<Note> = withContext(Dispatchers.IO) {
         val tree = getTree() ?: return@withContext emptyList()
+
         try {
             tree.listFiles()
                 .filter { it.isFile && isTextFile(it) }
@@ -45,16 +46,21 @@ class ExternalNoteRepository(
     }
 
     override suspend fun writeNote(note: Note, content: String): Boolean = withContext(Dispatchers.IO) {
+        val uri = note.uri ?: return@withContext false
+
         try {
-            note.uri?.let { uri ->
-                val outputStream = try {
-                    context.contentResolver.openOutputStream(uri, "wt")
-                } catch (e: Exception) {
-                    context.contentResolver.openOutputStream(uri)
-                }
-                outputStream?.use { it.write(content.toByteArray(Charsets.UTF_8)); it.flush() }
-                true
-            } ?: false
+            val outputStream = try {
+                context.contentResolver.openOutputStream(uri, "wt")
+            } catch (e: Exception) {
+                context.contentResolver.openOutputStream(uri)
+            }
+
+            outputStream?.use {
+                it.write(content.toByteArray(Charsets.UTF_8))
+                it.flush()
+            }
+
+            outputStream != null
         } catch (e: Exception) {
             false
         }
@@ -62,8 +68,10 @@ class ExternalNoteRepository(
 
     override suspend fun createNote(name: String): Note? = withContext(Dispatchers.IO) {
         val tree = getTree() ?: return@withContext null
+
         try {
             val doc = tree.createFile("text/plain", name) ?: return@withContext null
+
             Note(
                 id = doc.name ?: doc.uri.toString(),
                 name = doc.name ?: name,
@@ -76,26 +84,28 @@ class ExternalNoteRepository(
     }
 
     override suspend fun deleteNote(note: Note): Boolean = withContext(Dispatchers.IO) {
+        val uri = note.uri ?: return@withContext false
+
         try {
-            note.uri?.let { uri ->
-                DocumentFile.fromSingleUri(context, uri)?.delete() ?: false
-            } ?: false
+            DocumentFile.fromSingleUri(context, uri)?.delete() ?: false
         } catch (e: Exception) {
             false
         }
     }
 
     override suspend fun renameNote(note: Note, newName: String): Boolean = withContext(Dispatchers.IO) {
+        val uri = note.uri ?: return@withContext false
+
         try {
-            note.uri?.let { uri ->
-                val doc = DocumentFile.fromSingleUri(context, uri) ?: return@withContext false
-                val success = doc.renameTo(newName)
-                if (success) {
-                    note.uri = doc.uri
-                    note.name = newName
-                }
-                success
-            } ?: false
+            val doc = DocumentFile.fromSingleUri(context, uri) ?: return@withContext false
+            val success = doc.renameTo(newName)
+
+            if (success) {
+                note.uri = doc.uri
+                note.name = newName
+            }
+
+            success
         } catch (e: Exception) {
             false
         }
@@ -103,8 +113,13 @@ class ExternalNoteRepository(
 
     override fun hasPermission(): Boolean {
         val uri = treeUri ?: return false
-        return context.contentResolver.persistedUriPermissions.any {
-            it.uri == uri && it.isReadPermission && it.isWritePermission
+
+        return try {
+            context.contentResolver.persistedUriPermissions.any {
+                it.uri == uri && it.isReadPermission && it.isWritePermission
+            }
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -117,22 +132,56 @@ class ExternalNoteRepository(
             permissionCallback?.invoke(false)
             return false
         }
-        return try {
+
+        var readGranted = false
+        var writeGranted = false
+
+        // Try read permission separately.
+        try {
             context.contentResolver.takePersistableUriPermission(
                 uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            treeUri = uri
-            permissionCallback?.invoke(true)
-            true
-        } catch (e: Exception) {
-            permissionCallback?.invoke(false)
-            false
+            readGranted = true
+        } catch (_: Exception) {
         }
+
+        // Try write permission separately.
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            writeGranted = true
+        } catch (_: Exception) {
+        }
+
+        // Fallback: some devices prefer the combined call.
+        if (!readGranted || !writeGranted) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                readGranted = true
+                writeGranted = true
+            } catch (_: Exception) {
+            }
+        }
+
+        treeUri = uri
+
+        val success = hasPermission() || (readGranted && writeGranted)
+        permissionCallback?.invoke(success)
+        return success
     }
 
     fun getTree(): DocumentFile? {
-        return treeUri?.let { DocumentFile.fromTreeUri(context, it) }
+        return try {
+            treeUri?.let { DocumentFile.fromTreeUri(context, it) }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     fun setTreeUri(uri: Uri?) {
