@@ -63,6 +63,23 @@ class MainActivity : ComponentActivity() {
         private const val EXTRA_NOTE_ID = "extra_note_id"
     }
 
+    private data class SearchMatch(
+        val start: Int,
+        val length: Int
+    )
+
+    private data class ParsedQuery(
+        val raw: String,
+        val exactPhrase: Boolean,
+        val terms: List<String>
+    )
+
+    private data class GlobalSearchResult(
+        val note: Note,
+        val snippet: String,
+        val targetIndex: Int
+    )
+
     private lateinit var noteManager: NoteManager
     private lateinit var rootLayout: View
     private lateinit var editText: EditText
@@ -93,7 +110,7 @@ class MainActivity : ComponentActivity() {
     private var showKeyboardRunnable: Runnable? = null
     private var keyboardRetryRunnable: Runnable? = null
 
-    private var searchMatches = mutableListOf<Int>()
+    private var searchMatches = mutableListOf<SearchMatch>()
     private var currentSearchIndex = 0
     private var currentSearchQuery = ""
     private var searchCount: TextView? = null
@@ -1113,26 +1130,76 @@ class MainActivity : ComponentActivity() {
         updateSearchCount()
     }
 
+    private fun parseSearchQuery(raw: String): ParsedQuery {
+        val trimmed = raw.trim()
+
+        if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+            val phrase = trimmed.removeSurrounding("\"").trim()
+            if (phrase.isEmpty()) {
+                return ParsedQuery(raw, true, emptyList())
+            }
+            return ParsedQuery(raw, true, listOf(phrase))
+        }
+
+        val terms = trimmed
+            .split(Regex("\\s+"))
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+
+        return ParsedQuery(raw, false, terms)
+    }
+
     private fun performInNoteSearch(query: String) {
         clearSearchHighlights()
         searchMatches.clear()
         currentSearchIndex = 0
         currentSearchQuery = query
 
-        if (query.isEmpty()) {
+        val parsed = parseSearchQuery(query)
+
+        if (parsed.terms.isEmpty()) {
             updateSearchCount()
             return
         }
 
         val text = editText.text.toString()
-        var index = text.indexOf(query, 0, true)
+        val lowerText = text.lowercase()
 
-        while (index >= 0) {
-            searchMatches.add(index)
-            index = text.indexOf(query, index + query.length, true)
+        if (parsed.exactPhrase || parsed.terms.size == 1) {
+            val term = parsed.terms.first()
+            val lowerTerm = term.lowercase()
+
+            if (lowerTerm.isEmpty()) {
+                updateSearchCount()
+                return
+            }
+
+            var index = lowerText.indexOf(lowerTerm)
+
+            while (index >= 0) {
+                searchMatches.add(SearchMatch(index, term.length))
+                index = lowerText.indexOf(lowerTerm, index + term.length)
+            }
+        } else {
+            val allPresent = parsed.terms.all { lowerText.contains(it.lowercase()) }
+
+            if (!allPresent) {
+                updateSearchCount()
+                return
+            }
+
+            for (term in parsed.terms) {
+                val lowerTerm = term.lowercase()
+                var index = lowerText.indexOf(lowerTerm)
+
+                while (index >= 0) {
+                    searchMatches.add(SearchMatch(index, term.length))
+                    index = lowerText.indexOf(lowerTerm, index + term.length)
+                }
+            }
+
+            searchMatches.sortBy { it.start }
         }
-
-        highlightAllMatches(query)
 
         if (searchMatches.isNotEmpty()) {
             navigateSearch(0)
@@ -1156,14 +1223,14 @@ class MainActivity : ComponentActivity() {
         highlightCurrentMatch()
         updateSearchCount()
 
-        val position = searchMatches[currentSearchIndex]
+        val match = searchMatches[currentSearchIndex]
 
         try {
-            editText.setSelection(position, position + currentSearchQuery.length)
+            editText.setSelection(match.start, match.start + match.length)
         } catch (_: Exception) {
         }
 
-        scrollToSearchMatch(position)
+        scrollToSearchMatch(match.start)
     }
 
     private fun updateSearchCount() {
@@ -1184,20 +1251,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun highlightAllMatches(query: String) {
-        val spannable = editText.text as? Spannable ?: return
-        val normalColor = noteManager.searchHighlightColor
-
-        for (matchIndex in searchMatches) {
-            spannable.setSpan(
-                BackgroundColorSpan(normalColor),
-                matchIndex,
-                matchIndex + query.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-    }
-
     private fun highlightCurrentMatch() {
         val spannable = editText.text as? Spannable ?: return
         if (searchMatches.isEmpty() || currentSearchIndex >= searchMatches.size) return
@@ -1205,13 +1258,13 @@ class MainActivity : ComponentActivity() {
         val currentColor = noteManager.searchCurrentHighlightColor
         val normalColor = noteManager.searchHighlightColor
 
-        for ((i, matchIndex) in searchMatches.withIndex()) {
+        for ((i, match) in searchMatches.withIndex()) {
             val color = if (i == currentSearchIndex) currentColor else normalColor
 
             spannable.setSpan(
                 BackgroundColorSpan(color),
-                matchIndex,
-                matchIndex + currentSearchQuery.length,
+                match.start,
+                match.start + match.length,
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             )
         }
@@ -1268,27 +1321,77 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun performCrossNoteSearch(query: String) {
+        val parsed = parseSearchQuery(query)
+
+        if (parsed.terms.isEmpty()) {
+            toast(getString(R.string.no_search_results))
+            return
+        }
+
         lifecycleScope.launch {
-            val results = mutableListOf<Triple<Note, String, Int>>()
+            val results = mutableListOf<GlobalSearchResult>()
 
             for (note in allNotes) {
                 val content = noteManager.readNote(note) ?: continue
                 val lowerContent = content.lowercase()
-                val lowerQuery = query.lowercase()
 
-                var index = lowerContent.indexOf(lowerQuery)
+                if (parsed.exactPhrase || parsed.terms.size == 1) {
+                    val term = parsed.terms.first()
+                    val lowerTerm = term.lowercase()
 
-                while (index >= 0) {
-                    val start = maxOf(0, index - 30)
-                    val end = minOf(content.length, index + query.length + 30)
+                    if (lowerTerm.isEmpty()) continue
 
-                    val snippet =
-                        (if (start > 0) "..." else "") +
-                                content.substring(start, end) +
-                                (if (end < content.length) "..." else "")
+                    var index = lowerContent.indexOf(lowerTerm)
 
-                    results.add(Triple(note, snippet, index))
-                    index = lowerContent.indexOf(lowerQuery, index + query.length)
+                    while (index >= 0) {
+                        val snippet = buildSnippetAround(
+                            content,
+                            index,
+                            index + term.length
+                        )
+
+                        results.add(
+                            GlobalSearchResult(
+                                note = note,
+                                snippet = snippet,
+                                targetIndex = index
+                            )
+                        )
+
+                        index = lowerContent.indexOf(lowerTerm, index + term.length)
+                    }
+                } else {
+                    val ranges = mutableListOf<IntRange>()
+                    var targetIndex = -1
+                    var allFound = true
+
+                    for (term in parsed.terms) {
+                        val lowerTerm = term.lowercase()
+                        val index = lowerContent.indexOf(lowerTerm)
+
+                        if (index < 0) {
+                            allFound = false
+                            break
+                        }
+
+                        ranges.add(index until index + term.length)
+
+                        if (targetIndex == -1 || index < targetIndex) {
+                            targetIndex = index
+                        }
+                    }
+
+                    if (!allFound) continue
+
+                    val snippet = buildMultiWordSnippet(content, ranges)
+
+                    results.add(
+                        GlobalSearchResult(
+                            note = note,
+                            snippet = snippet,
+                            targetIndex = targetIndex
+                        )
+                    )
                 }
             }
 
@@ -1306,14 +1409,84 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun cleanSnippet(text: String): String {
+        return text
+            .replace(Regex("[\\r\\n\\t]+"), " ")
+            .trim()
+    }
+
+    private fun buildSnippetAround(
+        content: String,
+        matchStart: Int,
+        matchEnd: Int
+    ): String {
+        val before = 45
+        val after = 75
+
+        val start = maxOf(0, matchStart - before)
+        val end = minOf(content.length, matchEnd + after)
+
+        val prefix = if (start > 0) "..." else ""
+        val suffix = if (end < content.length) "..." else ""
+        val body = cleanSnippet(content.substring(start, end))
+
+        return prefix + body + suffix
+    }
+
+    private fun buildMultiWordSnippet(
+        content: String,
+        ranges: List<IntRange>
+    ): String {
+        if (ranges.isEmpty()) return ""
+
+        val sorted = ranges.sortedBy { it.first }
+        val context = 25
+        val mergeDistance = 35
+
+        val groups = mutableListOf<IntRange>()
+        var current = sorted.first()
+
+        for (range in sorted.drop(1)) {
+            if (range.first <= current.last + mergeDistance) {
+                current = minOf(current.first, range.first)..maxOf(current.last, range.last)
+            } else {
+                groups.add(current)
+                current = range
+            }
+        }
+
+        groups.add(current)
+
+        val parts = mutableListOf<String>()
+
+        for (group in groups) {
+            val start = maxOf(0, group.first - context)
+            val end = minOf(content.length, group.last + context)
+
+            val prefix = if (start > 0) "..." else ""
+            val suffix = if (end < content.length) "..." else ""
+            val body = cleanSnippet(content.substring(start, end))
+
+            parts.add(prefix + body + suffix)
+        }
+
+        var snippet = parts.joinToString(" ... ")
+
+        if (snippet.length > 350) {
+            snippet = snippet.take(347) + "..."
+        }
+
+        return snippet
+    }
+
     private fun showGlobalSearchResultsDialog(
         query: String,
-        results: List<Triple<Note, String, Int>>
+        results: List<GlobalSearchResult>
     ) {
         val adapter = object : BaseAdapter() {
             override fun getCount(): Int = results.size
 
-            override fun getItem(position: Int): Triple<Note, String, Int> = results[position]
+            override fun getItem(position: Int): Any = results[position]
 
             override fun getItemId(position: Int): Long = position.toLong()
 
@@ -1321,19 +1494,19 @@ class MainActivity : ComponentActivity() {
                 val view = convertView ?: LayoutInflater.from(this@MainActivity)
                     .inflate(android.R.layout.simple_list_item_2, parent, false)
 
-                val item = getItem(position)
+                val item = results[position]
 
                 val text1 = view.findViewById<TextView>(android.R.id.text1)
                 val text2 = view.findViewById<TextView>(android.R.id.text2)
 
-                text1?.text = item.first.displayName
-                text2?.text = item.second
+                text1?.text = item.note.displayName
+                text2?.text = item.snippet
 
-                // Note title uses the app/settings color.
+                // Title uses the app/theme color, normally green.
                 text1?.setTextColor(noteManager.appColor)
 
-                // Snippet uses the normal search highlight color, preserving opacity.
-                text2?.setTextColor(noteManager.searchHighlightColor)
+                // Snippet remains white for readability.
+                text2?.setTextColor(Color.WHITE)
 
                 text1?.textSize = 15f
                 text2?.textSize = 13f
@@ -1344,7 +1517,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (text2 != null) {
-                    text2.maxLines = 2
+                    text2.maxLines = 3
                     text2.ellipsize = android.text.TextUtils.TruncateAt.END
                 }
 
@@ -1357,7 +1530,7 @@ class MainActivity : ComponentActivity() {
                 getString(
                     R.string.search_results,
                     results.size,
-                    results.map { it.first }.distinct().size
+                    results.map { it.note }.distinct().size
                 )
             )
             .setAdapter(adapter) { _, which ->
@@ -1394,9 +1567,10 @@ class MainActivity : ComponentActivity() {
 
     private fun openGlobalSearchResult(
         query: String,
-        result: Triple<Note, String, Int>
+        result: GlobalSearchResult
     ) {
-        val (note, _, matchIndex) = result
+        val note = result.note
+        val matchIndex = result.targetIndex
 
         lifecycleScope.launch {
             suppressNextOpenNoteKeyboard = true
@@ -1419,10 +1593,10 @@ class MainActivity : ComponentActivity() {
                     return@postDelayed
                 }
 
-                var targetIdx = searchMatches.indexOfFirst { it >= matchIndex }
+                var targetIdx = searchMatches.indexOfFirst { it.start >= matchIndex }
 
                 if (targetIdx == -1) {
-                    targetIdx = searchMatches.indexOfLast { it <= matchIndex }
+                    targetIdx = searchMatches.indexOfLast { it.start <= matchIndex }
                 }
 
                 if (targetIdx == -1) {
@@ -1433,14 +1607,14 @@ class MainActivity : ComponentActivity() {
                 highlightCurrentMatch()
                 updateSearchCount()
 
-                val pos = searchMatches[currentSearchIndex]
+                val match = searchMatches[currentSearchIndex]
 
                 try {
-                    editText.setSelection(pos, pos + currentSearchQuery.length)
+                    editText.setSelection(match.start, match.start + match.length)
                 } catch (_: Exception) {
                 }
 
-                scrollToSearchMatch(pos)
+                scrollToSearchMatch(match.start)
             }, 250)
         }
     }
@@ -1708,7 +1882,6 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (searchBar.visibility == View.VISIBLE && currentSearchQuery.isNotEmpty()) {
-                    highlightAllMatches(currentSearchQuery)
                     highlightCurrentMatch()
                 }
             } catch (e: Exception) {
