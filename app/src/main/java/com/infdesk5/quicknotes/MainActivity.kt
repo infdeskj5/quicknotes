@@ -18,16 +18,17 @@ import android.text.style.BackgroundColorSpan
 import android.util.TypedValue
 import android.view.ActionMode
 import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.widget.BaseAdapter
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
@@ -580,10 +581,10 @@ class MainActivity : ComponentActivity() {
                 onItemClick(which)
             }
             .setNegativeButton(getString(R.string.cancel), null)
-    
+
         val dialog = builder.create()
         dialog.show()
-    
+
         dialog.window?.setGravity(Gravity.BOTTOM)
         dialog.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -592,11 +593,11 @@ class MainActivity : ComponentActivity() {
         dialog.window?.setSoftInputMode(
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
         )
-    
+
         // Keep the dialog inside easy thumb reach.
         val maxHeight = (resources.displayMetrics.heightPixels * 0.45).toInt()
         val listView = dialog.listView
-    
+
         listView?.post {
             if (listView.height > maxHeight) {
                 val lp = listView.layoutParams
@@ -867,18 +868,18 @@ class MainActivity : ComponentActivity() {
 
     private fun showNotesMenu() {
         hideKeyboard()
-    
+
         lifecycleScope.launch {
             saveCurrentNoteNow()
-    
+
             val notes = noteManager.listNotes()
             if (notes.isEmpty()) {
                 toast(getString(R.string.no_notes_found))
                 return@launch
             }
-    
+
             val names = notes.map { it.displayName }.toTypedArray()
-    
+
             val builder = AlertDialog.Builder(this@MainActivity)
                 .setTitle(getString(R.string.notes))
                 .setItems(names) { _, which ->
@@ -888,10 +889,10 @@ class MainActivity : ComponentActivity() {
                     showCrossNoteSearch()
                 }
                 .setNegativeButton(getString(R.string.cancel), null)
-    
+
             val dialog = builder.create()
             dialog.show()
-    
+
             dialog.window?.setGravity(Gravity.BOTTOM)
             dialog.window?.setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -900,17 +901,17 @@ class MainActivity : ComponentActivity() {
             dialog.window?.setSoftInputMode(
                 WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
             )
-    
+
             val listView = dialog.listView
-    
-            // Long press to open note options (assign, delete, rename, shortcut)
+
+            // Long press to open note options.
             listView?.setOnItemLongClickListener { _, _, position, _ ->
                 dialog.dismiss()
                 showNoteOptionsDialog(notes[position])
                 true
             }
-    
-            // Limit the list height to 40% of the screen (same as settings menu)
+
+            // Limit the list height to 40% of the screen, like the settings menu.
             val maxHeight = (resources.displayMetrics.heightPixels * 0.40).toInt()
             listView?.post {
                 if (listView.height > maxHeight) {
@@ -1269,80 +1270,88 @@ class MainActivity : ComponentActivity() {
     private fun performCrossNoteSearch(query: String) {
         lifecycleScope.launch {
             val results = mutableListOf<Triple<Note, String, Int>>()
-    
+
             for (note in allNotes) {
                 val content = noteManager.readNote(note) ?: continue
                 val lowerContent = content.lowercase()
                 val lowerQuery = query.lowercase()
-    
+
                 var index = lowerContent.indexOf(lowerQuery)
-    
+
                 while (index >= 0) {
                     val start = maxOf(0, index - 30)
                     val end = minOf(content.length, index + query.length + 30)
-    
+
                     val snippet =
                         (if (start > 0) "..." else "") +
                                 content.substring(start, end) +
                                 (if (end < content.length) "..." else "")
-    
+
                     results.add(Triple(note, snippet, index))
                     index = lowerContent.indexOf(lowerQuery, index + query.length)
                 }
             }
-    
+
             if (results.isEmpty()) {
                 toast(getString(R.string.no_search_results))
                 return@launch
             }
-    
+
             hideKeyboard()
-    
+
             rootLayout.postDelayed({
                 hideKeyboard()
                 showGlobalSearchResultsDialog(query, results)
             }, 150)
         }
     }
-    
+
     private fun showGlobalSearchResultsDialog(
         query: String,
         results: List<Triple<Note, String, Int>>
     ) {
-        val adapter = object : android.widget.ArrayAdapter<Triple<Note, String, Int>>(
-            this,
-            android.R.layout.simple_list_item_2,
-            results
-        ) {
+        val adapter = object : BaseAdapter() {
+            override fun getCount(): Int = results.size
+
+            override fun getItem(position: Int): Triple<Note, String, Int> = results[position]
+
+            override fun getItemId(position: Int): Long = position.toLong()
+
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val view = super.getView(position, convertView, parent)
+                val view = convertView ?: LayoutInflater.from(this@MainActivity)
+                    .inflate(android.R.layout.simple_list_item_2, parent, false)
+
                 val item = getItem(position)
-    
+
                 val text1 = view.findViewById<TextView>(android.R.id.text1)
                 val text2 = view.findViewById<TextView>(android.R.id.text2)
-    
-                text1?.text = item?.first?.displayName ?: ""
-                text2?.text = item?.second ?: ""
-    
+
+                text1?.text = item.first.displayName
+                text2?.text = item.second
+
                 // Note title uses the app/settings color.
                 text1?.setTextColor(noteManager.appColor)
-    
-                // Snippet stays white.
-                text2?.setTextColor(Color.WHITE)
-    
+
+                // Snippet uses the normal search highlight color, preserving opacity.
+                text2?.setTextColor(noteManager.searchHighlightColor)
+
                 text1?.textSize = 15f
                 text2?.textSize = 13f
-    
-                text1?.maxLines = 1
-                text1?.ellipsize = android.text.TextUtils.TruncateAt.END
-    
-                text2?.maxLines = 2
-                text2?.ellipsize = android.text.TextUtils.TruncateAt.END
-    
+
+                if (text1 != null) {
+                    text1.maxLines = 1
+                    text1.ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+
+                if (text2 != null) {
+                    text2.maxLines = 2
+                    text2.ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+
                 return view
             }
         }
-    
+
         val builder = AlertDialog.Builder(this)
             .setTitle(
                 getString(
@@ -1355,10 +1364,10 @@ class MainActivity : ComponentActivity() {
                 openGlobalSearchResult(query, results[which])
             }
             .setNegativeButton(getString(R.string.cancel), null)
-    
+
         val dialog = builder.create()
         dialog.show()
-    
+
         dialog.window?.setGravity(Gravity.BOTTOM)
         dialog.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1367,7 +1376,7 @@ class MainActivity : ComponentActivity() {
         dialog.window?.setSoftInputMode(
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
         )
-    
+
         // Keep the results list inside easy thumb reach.
         val maxHeight = (resources.displayMetrics.heightPixels * 0.45).toInt()
         dialog.listView?.post {
@@ -1382,55 +1391,55 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    
+
     private fun openGlobalSearchResult(
         query: String,
         result: Triple<Note, String, Int>
     ) {
         val (note, _, matchIndex) = result
-    
+
         lifecycleScope.launch {
             suppressNextOpenNoteKeyboard = true
             suppressNextOpenNoteScrollToEnd = true
-    
+
             openNote(note)
-    
+
             searchBar.visibility = View.VISIBLE
             noteSlotBar.visibility = View.GONE
-    
+
             hideKeyboard()
-    
+
             searchInput.setText(query)
             updateSearchCount()
-    
+
             editText.postDelayed({
                 if (isFinishing || isDestroyed) return@postDelayed
-    
+
                 if (searchMatches.isEmpty()) {
                     return@postDelayed
                 }
-    
+
                 var targetIdx = searchMatches.indexOfFirst { it >= matchIndex }
-    
+
                 if (targetIdx == -1) {
                     targetIdx = searchMatches.indexOfLast { it <= matchIndex }
                 }
-    
+
                 if (targetIdx == -1) {
                     targetIdx = 0
                 }
-    
+
                 currentSearchIndex = targetIdx
                 highlightCurrentMatch()
                 updateSearchCount()
-    
+
                 val pos = searchMatches[currentSearchIndex]
-    
+
                 try {
                     editText.setSelection(pos, pos + currentSearchQuery.length)
                 } catch (_: Exception) {
                 }
-    
+
                 scrollToSearchMatch(pos)
             }, 250)
         }
