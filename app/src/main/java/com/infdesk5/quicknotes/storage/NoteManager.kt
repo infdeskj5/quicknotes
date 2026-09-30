@@ -25,6 +25,7 @@ class NoteManager(
         private const val KEY_TOP_INSET_PERCENT = "top_inset_percent"
         private const val KEY_APP_COLOR = "app_color"
         private const val KEY_KEYBOARD_ON_SELECT = "keyboard_on_select"
+        private const val KEY_CLOSE_SETTINGS_ON_SELECT = "close_settings_on_select"
         private const val KEY_SCROLLER_SIZE = "scroller_size"
         private const val KEY_SHOW_SCROLLER = "show_scroller"
         private const val KEY_SEARCH_HIGHLIGHT = "search_highlight"
@@ -82,6 +83,10 @@ class NoteManager(
         get() = prefs.getBoolean(KEY_KEYBOARD_ON_SELECT, false)
         set(value) = prefs.edit().putBoolean(KEY_KEYBOARD_ON_SELECT, value).apply()
 
+    var closeSettingsOnSelect: Boolean
+        get() = prefs.getBoolean(KEY_CLOSE_SETTINGS_ON_SELECT, false)
+        set(value) = prefs.edit().putBoolean(KEY_CLOSE_SETTINGS_ON_SELECT, value).apply()
+    
     var searchHighlightColor: Int
         get() = prefs.getInt(KEY_SEARCH_HIGHLIGHT, 0x809C27B0.toInt())
         set(value) = prefs.edit().putInt(KEY_SEARCH_HIGHLIGHT, value).apply()
